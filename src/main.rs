@@ -1,5 +1,10 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
+// This struct represents state
+struct AppState {
+  coordinates: (f32, f32),
+}
+
 #[get("/")]
 async fn hello() -> impl Responder {
     HttpResponse::Ok().body("Hello world!")
