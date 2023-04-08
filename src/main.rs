@@ -10,15 +10,6 @@ struct AppState {
   coordinates: (f32, f32),
 }
 
-// #[derive(Debug, Serialize, Deserialize)]
-// struct Data {
-//   #[serde(rename = "type")]
-//   type_name: String,
-//   coordinates: String,
-//   geometry: String,
-//   properties: String,
-// }
-
 #[derive(Debug, Serialize, Deserialize)]
 struct ForecastRecord {
   time: String,
@@ -33,18 +24,21 @@ struct NextForecastRecord {
   symbol: String
 }
 
-#[get("/")]
-async fn hello() -> impl Responder {
-  let response = get_forecast().await.expect("fdsodfsd");
-  //println!("Status: {:#?}", response);
-  let res_json = serde_json::to_string(&response).unwrap();
-
-  HttpResponse::Ok().body(res_json)
+#[derive(Debug, Serialize, Deserialize)]
+struct Coordinates {
+  lat: f64,
+  lon: f64
 }
 
-async fn get_forecast() -> Result<Vec<ForecastRecord>, Box<dyn std::error::Error>> {
+#[get("/")]
+async fn hello(coordinates: web::Query<Coordinates>) -> impl Responder {
+  HttpResponse::Ok().body(String::from("hi"))
+}
+
+async fn get_forecast(coordinates: &Coordinates) -> Result<Vec<ForecastRecord>, Box<dyn std::error::Error>> {
   let client = reqwest::Client::new();
-  let response = client.get("https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=34&lon=65")
+  let addr = format!("https://api.met.no/weatherapi/locationforecast/2.0/compact?lat={0}&lon={1}", coordinates.lat, coordinates.lon);
+  let response = client.get(addr)
   .header(USER_AGENT, "https://github.com/YuliaProkopovych/weather-forecast")
   .send()
   .await?;
@@ -58,6 +52,35 @@ async fn get_forecast() -> Result<Vec<ForecastRecord>, Box<dyn std::error::Error
   //println!("{:#?}", formatted_vec[0].next_hour.as_ref().unwrap());
 
   Result::Ok(formatted_vec)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TimezoneInfo {
+  timezoneId: String,
+  offset: f32
+}
+
+async fn get_timezones(coordinates: &Coordinates) -> Result<TimezoneInfo, Box<dyn std::error::Error>> {
+
+  let client = reqwest::Client::new();
+  let url = format!("https://www.timeapi.io/api/TimeZone/coordinate?latitude={0}&longitude={1}", coordinates.lat, coordinates.lon);
+  let response = client.get(url)
+    .send()
+    .await?;
+
+  let res_json = response.json::<serde_json::Value>().await?;
+
+  let current_offset = &res_json["currentUtcOffset"];
+  let offset_in_seconds = &current_offset["seconds"];
+  let mut current_offset: f32 = serde_json::from_value((*offset_in_seconds).clone()).unwrap();
+  current_offset = current_offset / 3600.0;
+  let timezone_id = res_json["timeZone"].as_str().unwrap().to_string();
+  let result = TimezoneInfo {
+    timezoneId: timezone_id,
+    offset: current_offset
+  };
+
+  Result::Ok( result)
 }
 
 fn format_forecast(array: Vec<serde_json::Value>) -> Vec<ForecastRecord> {
@@ -100,10 +123,30 @@ fn format_forecast(array: Vec<serde_json::Value>) -> Vec<ForecastRecord> {
 
   formatted_vec
 }
+#[derive(Debug, Serialize, Deserialize)]
+struct ForecastInfo {
+  forecast: Vec<ForecastRecord>,
+  timezoneId: String,
+  offset: f32,
+  coordinates: Coordinates,
+}
 
 #[post("/forecast")]
-async fn forecast(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
+async fn forecast(coordinates: web::Json<Coordinates>) -> impl Responder {
+  //println!("Status: {:#?}", coordinates);
+  let coords = coordinates.into_inner();
+  let forecast = get_forecast(&coords).await.expect("fdsodfsd");
+  let timezone = get_timezones(&coords).await.expect("sdfsdfsd");
+  println!("Status: {:#?}", timezone);
+  let response = ForecastInfo {
+    forecast,
+    coordinates: coords,
+    timezoneId: timezone.timezoneId,
+    offset: timezone.offset
+  };
+  let res_json = serde_json::to_string(&response).unwrap();
+
+  HttpResponse::Ok().body(res_json)
 }
 
 async fn manual_hello() -> impl Responder {
